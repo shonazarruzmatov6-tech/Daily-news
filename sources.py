@@ -14,19 +14,14 @@
 # -------------------------------------------------------------------------
 
 SOURCES = [
-    # --- Dedicated economy feeds (kept in full) ---
+    # Gazeta.uz — verified working
     {"name": "Gazeta.uz · Economy (EN)", "url": "https://www.gazeta.uz/en/rss/?section=economy", "financial_only": True},
     {"name": "Gazeta.uz · Economy (RU)", "url": "https://www.gazeta.uz/ru/rss/?section=economy", "financial_only": True},
-
-    # --- General feeds (keyword-filtered to finance/economy) ---
     {"name": "Gazeta.uz · All (EN)",     "url": "https://www.gazeta.uz/en/rss/",                 "financial_only": False},
-    {"name": "Kun.uz (UZ)",              "url": "https://kun.uz/uz/rss",                         "financial_only": False},
-    {"name": "Kun.uz (RU)",              "url": "https://kun.uz/ru/rss",                         "financial_only": False},
-    {"name": "Daryo.uz",                 "url": "https://daryo.uz/feed",                         "financial_only": False},
-    {"name": "Xabar.uz",                 "url": "https://xabar.uz/rss",                          "financial_only": False},
-    {"name": "UzDaily (EN)",             "url": "https://www.uzdaily.uz/en/rss",                 "financial_only": False},
-    {"name": "UzReport",                 "url": "https://uzreport.news/rss",                     "financial_only": False},
-    {"name": "Podrobno.uz",              "url": "https://podrobno.uz/rss/",                      "financial_only": False},
+    # Kun.uz — official RSS endpoint (/news/rss), one per language
+    {"name": "Kun.uz (UZ)", "url": "https://kun.uz/news/rss",    "financial_only": False},
+    {"name": "Kun.uz (RU)", "url": "https://kun.uz/ru/news/rss", "financial_only": False},
+    {"name": "Kun.uz (EN)", "url": "https://kun.uz/en/news/rss", "financial_only": False},
 ]
 
 # Coarse pre-filter (Uzbek / Russian / English). The model does the final
