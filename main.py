@@ -225,7 +225,7 @@ Items (JSON):
     body = {
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}},,
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}},
     }
     headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
 
