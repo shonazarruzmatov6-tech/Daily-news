@@ -96,6 +96,37 @@ def extract_gemini_text(data):
         raise RuntimeError("Unexpected Gemini response: " + json.dumps(data)[:300])
 
 
+def esc(s):
+    """Escape only &, <, > for Telegram HTML (leave quotes so they render normally)."""
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def linkify(text, link_map):
+    """Turn the model's {{S1}} / {{S1,S2}} citation markers into clickable links.
+
+    The model emits ONLY these markers (no raw HTML, no URLs), so we can safely
+    HTML-escape its prose first and then inject the <a> tags we build from the
+    feed data. Links therefore come from the source data, never the model.
+    """
+    text = esc(text)
+    def repl(m):
+        parts, seen = [], set()
+        for sid in m.group(1).split(","):
+            info = link_map.get(sid.strip())
+            if not info:
+                continue
+            url, label = info.get("url", ""), info.get("source", "source")
+            if url and url in seen:
+                continue
+            if url:
+                seen.add(url)
+                parts.append(f'<a href="{esc(url)}">{esc(label)}</a>')
+            else:
+                parts.append(esc(label))            # no URL: plain attribution
+        return "[" + " / ".join(parts) + "]" if parts else ""
+    return re.sub(r"\{\{([^{}]+)\}\}", repl, text)
+
+
 # ----------------------------- State (de-dup) -----------------------------
 def load_seen():
     try:
@@ -170,6 +201,7 @@ def telegram_send(text):
             r = requests.post(url, data={
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": chunk,
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }, timeout=REQUEST_TIMEOUT)
             if r.status_code != 200:
@@ -193,39 +225,42 @@ def gemini_summarize(items):
         "is unclear or unverifiable, omit it rather than guess."
     )
 
-    instructions = f"""Write the brief in {DIGEST_LANGUAGE}.
-
-Format exactly like this — plain text only, no markdown symbols (#, *, _):
-
-UZBEK FINANCIAL BRIEF — {today_str}
-
-TOP STORIES
-- <one-line takeaway> - <why it matters, <=12 words> [Source]
-(3 to 6 lines, most important first)
-
-BY THEME
-(Include only the themes that actually have news. Use these section headers:)
-MONETARY & CENTRAL BANK
-BANKING & FINANCE
-CURRENCY & MARKETS
-FISCAL, TAX & BUDGET
-TRADE & INVESTMENT
-CORPORATE & BUSINESS
-- <short bullet with concrete numbers/names/figures> [Source]
-
-Rules: keep the whole brief under 3500 characters; neutral, factual tone;
-prefer specific figures over vague phrasing; no opinions or closing commentary.
-
-Items (JSON):
-"""
-    payload = [{"source": it["source"], "title": it["title"], "summary": it["summary"]}
-               for it in items]
+    header_line = f"UZBEK FINANCIAL BRIEF — {today_str}"
+    instructions = (
+        f"Write the brief in {DIGEST_LANGUAGE}.\n\n"
+        "Format exactly like this — plain text only, no markdown (#, *, _) and no HTML:\n\n"
+        + header_line + "\n\n"
+        "TOP STORIES\n"
+        "- <one-line takeaway> - <why it matters, <=12 words> {{id}}\n"
+        "(3 to 6 lines, most important first)\n\n"
+        "BY THEME\n"
+        "(Include only themes that have news. Use these section headers as needed:)\n"
+        "MONETARY & CENTRAL BANK\n"
+        "BANKING & FINANCE\n"
+        "CURRENCY & MARKETS\n"
+        "FISCAL, TAX & BUDGET\n"
+        "TRADE & INVESTMENT\n"
+        "CORPORATE & BUSINESS\n"
+        "- <short bullet with concrete numbers/names/figures> {{id}}\n\n"
+        "CITATIONS: end EVERY line with a source marker built from the item's \"id\" "
+        "field, e.g. {{S3}}. If you merged the same story from several items, combine "
+        "their ids: {{S3,S7}}. Use the double-curly-brace marker exactly, and put nothing "
+        "else where the source goes (no outlet names, no square brackets).\n\n"
+        "Rules: keep the whole brief under 3500 characters; neutral, factual tone; prefer "
+        "specific figures over vague phrasing; no opinions or closing commentary.\n\n"
+        "Items (JSON):\n"
+    )
+    payload = [{"id": f"S{i+1}", "source": it["source"], "title": it["title"],
+                "summary": it["summary"]} for i, it in enumerate(items)]
+    link_map = {f"S{i+1}": {"source": it["source"], "url": it["link"]}
+                for i, it in enumerate(items)}
     prompt = instructions + json.dumps(payload, ensure_ascii=False)
 
     body = {
         "system_instruction": {"parts": [{"text": system}]},
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}},
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192,
+                             "thinkingConfig": {"thinkingBudget": 0}},
     }
     headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
 
@@ -236,7 +271,7 @@ Items (JSON):
             try:
                 r = requests.post(url, headers=headers, json=body, timeout=90)
                 if r.status_code == 200:
-                    return extract_gemini_text(r.json())
+                    return linkify(extract_gemini_text(r.json()), link_map)
                 if r.status_code in (429, 500, 503):           # transient: retry
                     last_err = f"{model}: HTTP {r.status_code}"
                     time.sleep(5 * (attempt + 1)); continue
@@ -287,7 +322,7 @@ def main():
     footer = ""
     if failures:
         footer = ("\n\n----------\nSources skipped today (edit sources.py):\n"
-                  + "\n".join("- " + f for f in failures))
+                  + "\n".join("- " + esc(f) for f in failures))
 
     if not filtered:
         telegram_send(f"UZBEK FINANCIAL BRIEF\n\nNo major new financial news in the "
@@ -299,7 +334,7 @@ def main():
         summary = gemini_summarize(filtered)
     except Exception as e:
         telegram_send("UZBEK FINANCIAL BRIEF\n\nCould not generate today's summary.\n"
-                      f"Reason: {e}" + footer)
+                      "Reason: " + esc(str(e)) + footer)
         save_seen(seen_list)
         sys.exit(1)
 
